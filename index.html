@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Monitor Ambiental — ESP32</title>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --border:  #21262d;
+      --orange:  #f97316;
+      --blue:    #38bdf8;
+      --green:   #22c55e;
+      --purple:  #a78bfa;
+      --cyan:    #06b6d4;
+      --red:     #ef4444;
+      --text:    #e6edf3;
+      --muted:   #7d8590;
+      --mono:    "JetBrains Mono","Fira Mono",monospace;
+      --sans:    "Inter","Segoe UI",sans-serif;
+      --r:       10px;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column}
+
+    /* HEADER */
+    header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 28px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+    .logo{display:flex;align-items:center;gap:10px}
+    .logo h1{font-size:1rem;font-weight:700;letter-spacing:-.02em}
+    .logo span{color:var(--orange)}
+    .hchips{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .chip{display:flex;align-items:center;gap:5px;font-size:.73rem;color:var(--muted);background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
+    .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);transition:background .3s}
+    .dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+    .dot.off{background:var(--red)}
+    .badge{display:inline-flex;align-items:center;gap:5px;font-size:.73rem;font-weight:600;padding:4px 10px;border-radius:20px;background:rgba(239,68,68,.1);color:var(--red);border:1px solid rgba(239,68,68,.25)}
+    .badge.run{background:rgba(34,197,94,.12);color:var(--green);border-color:rgba(34,197,94,.3)}
+    .blink{width:7px;height:7px;border-radius:50%;background:currentColor;animation:blink 1.2s ease-in-out infinite}
+    .badge:not(.run) .blink{animation:none}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+    /* TIMER */
+    .timer-chip{font-family:var(--mono);font-size:.78rem;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:4px 12px;color:var(--blue)}
+
+    /* MAIN */
+    main{flex:1;padding:24px 28px;display:grid;grid-template-columns:repeat(5,1fr);gap:16px;max-width:1400px;margin:0 auto;width:100%}
+
+    /* CARDS */
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px}
+    .card-label{font-size:.67rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:6px}
+    .val{font-family:var(--mono);font-size:2.6rem;font-weight:700;line-height:1;letter-spacing:-.03em}
+    .unit{font-size:1.2rem;color:var(--muted)}
+    .card-sub{font-size:.72rem;color:var(--muted);margin-top:6px}
+
+    .c-tint {color:var(--blue)}
+    .c-hint {color:var(--cyan)}
+    .c-tamb {color:var(--orange)}
+    .c-hamb {color:var(--purple)}
+    .c-tent {color:var(--green)}
+
+    /* CONTROL */
+    .ctrl{grid-column:span 5;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px}
+    .ctrl-info h2{font-size:.95rem;font-weight:600}
+    .ctrl-info p{font-size:.78rem;color:var(--muted);margin-top:3px}
+    .btns{display:flex;gap:8px;flex-wrap:wrap}
+    button{cursor:pointer;border:none;border-radius:var(--r);padding:9px 20px;font-size:.82rem;font-weight:600;transition:opacity .15s,transform .1s}
+    button:active{transform:scale(.97)}
+    button:disabled{opacity:.4;cursor:not-allowed}
+    .b-start{background:var(--green);color:#0d1117}
+    .b-stop{background:var(--red);color:#fff}
+    .b-exp{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+    .b-exp:hover:not(:disabled){border-color:var(--orange);color:var(--orange)}
+    .b-del{background:var(--surface);color:var(--red);border:1px solid var(--border)}
+
+    /* CHART */
+    .chart-card{grid-column:span 5}
+    .chart-card h3{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:12px}
+    .chart-legend{display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap}
+    .leg{display:flex;align-items:center;gap:5px;font-size:.72rem;color:var(--muted)}
+    .leg-dot{width:10px;height:3px;border-radius:2px}
+    svg.chart{width:100%;height:180px;overflow:visible}
+
+    /* TABLE */
+    .tbl-card{grid-column:span 5;overflow:hidden}
+    .tbl-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .tbl-head h3{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+    .tbl-wrap{overflow-x:auto}
+    table{width:100%;border-collapse:collapse;font-size:.8rem;font-family:var(--mono)}
+    thead tr{border-bottom:1px solid var(--border)}
+    th{text-align:left;padding:7px 10px;color:var(--muted);font-weight:500;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em}
+    td{padding:8px 10px;border-bottom:1px solid rgba(33,38,45,.6)}
+    tbody tr:hover{background:rgba(255,255,255,.03)}
+    .empty{text-align:center;padding:32px;color:var(--muted);font-size:.82rem}
+
+    @media(max-width:900px){
+      main{grid-template-columns:repeat(2,1fr)}
+      .ctrl,.chart-card,.tbl-card{grid-column:span 2}
+      .val{font-size:2rem}
+    }
+    @media(max-width:500px){
+      main{grid-template-columns:1fr}
+      .ctrl,.chart-card,.tbl-card{grid-column:span 1}
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg width="30" height="30" viewBox="0 0 30 30" fill="none">
+      <rect width="30" height="30" rx="7" fill="#161b22"/>
+      <circle cx="15" cy="18" r="5" fill="#f97316" opacity=".9"/>
+      <path d="M15 5v9" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>
+      <path d="M9 10H7M9 14H7M9 18H7" stroke="#7d8590" stroke-width="1.4" stroke-linecap="round"/>
+      <circle cx="22" cy="10" r="3" fill="#a78bfa" opacity=".8"/>
+      <path d="M20 8l-2-2M24 8l2-2M22 7V5" stroke="#a78bfa" stroke-width="1.2" stroke-linecap="round" opacity=".6"/>
+    </svg>
+    <h1>Ambiente<span>Monitor</span> — ESP32</h1>
+  </div>
+  <div class="hchips">
+    <div class="chip"><span class="dot" id="wDot"></span><span id="wLabel">Conectando…</span></div>
+    <div class="timer-chip">⏱ <span id="timerDisp">00:00:00</span></div>
+    <div class="badge" id="badge"><span class="blink"></span><span id="badgeTxt">Detenido</span></div>
+  </div>
+</header>
+
+<main>
+  <!-- 5 tarjetas de valores -->
+  <div class="card">
+    <div class="card-label">🌡 Temp Interior</div>
+    <div class="val c-tint" id="vTint">—<span class="unit">°C</span></div>
+    <div class="card-sub">DHT11 Interior</div>
+  </div>
+  <div class="card">
+    <div class="card-label">💧 Hum Interior</div>
+    <div class="val c-hint" id="vHint">—<span class="unit">%</span></div>
+    <div class="card-sub">DHT11 Interior</div>
+  </div>
+  <div class="card">
+    <div class="card-label">🌡 Temp Ambiente</div>
+    <div class="val c-tamb" id="vTamb">—<span class="unit">°C</span></div>
+    <div class="card-sub">DHT11 Ambiente</div>
+  </div>
+  <div class="card">
+    <div class="card-label">💧 Hum Ambiente</div>
+    <div class="val c-hamb" id="vHamb">—<span class="unit">%</span></div>
+    <div class="card-sub">DHT11 Ambiente</div>
+  </div>
+  <div class="card">
+    <div class="card-label">🌡 Temp Entrada</div>
+    <div class="val c-tent" id="vTent">—<span class="unit">°C</span></div>
+    <div class="card-sub">DS18B20 Entrada</div>
+  </div>
+
+  <!-- Control -->
+  <div class="card ctrl">
+    <div class="ctrl-info">
+      <h2>Control de medición</h2>
+      <p>El cambio se aplica en el próximo ciclo del ESP32 (≈ 1 s).</p>
+    </div>
+    <div class="btns">
+      <button class="b-start" id="bStart" onclick="setMid(true)">▶ Iniciar</button>
+      <button class="b-stop"  id="bStop"  onclick="setMid(false)" disabled>■ Detener</button>
+      <button class="b-exp"   onclick="expExcel()">⬇ Excel</button>
+      <button class="b-exp"   onclick="expTxt()">⬇ TXT</button>
+      <button class="b-del"   onclick="limpiar()">🗑 Limpiar</button>
+    </div>
+  </div>
+
+  <!-- Gráfica -->
+  <div class="card chart-card">
+    <h3>Historial — últimas 40 lecturas</h3>
+    <div class="chart-legend">
+      <div class="leg"><div class="leg-dot" style="background:#38bdf8"></div>T.Interior</div>
+      <div class="leg"><div class="leg-dot" style="background:#f97316"></div>T.Ambiente</div>
+      <div class="leg"><div class="leg-dot" style="background:#22c55e"></div>T.Entrada</div>
+      <div class="leg"><div class="leg-dot" style="background:#06b6d4;opacity:.6"></div>H.Interior</div>
+      <div class="leg"><div class="leg-dot" style="background:#a78bfa;opacity:.6"></div>H.Ambiente</div>
+    </div>
+    <svg class="chart" id="chartSvg" viewBox="0 0 1000 160" preserveAspectRatio="none">
+      <text x="500" y="85" text-anchor="middle" fill="#7d8590" font-size="13">Sin datos aún</text>
+    </svg>
+  </div>
+
+  <!-- Tabla -->
+  <div class="card tbl-card">
+    <div class="tbl-head">
+      <h3>Registro de mediciones</h3>
+      <span id="cntReg" style="font-size:.73rem;color:var(--muted)">0 registros</span>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th style="color:#7d8590">Tiempo (s)</th>
+            <th style="color:#38bdf8">T.Int (°C)</th>
+            <th style="color:#06b6d4">H.Int (%)</th>
+            <th style="color:#f97316">T.Amb (°C)</th>
+            <th style="color:#a78bfa">H.Amb (%)</th>
+            <th style="color:#22c55e">T.Ent (°C)</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="7" class="empty">Sin registros todavía.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+// ╔══════════════════════════════════════════╗
+// ║   ✏️  EDITA AQUÍ TU CONFIGURACIÓN FIREBASE ║
+// ╚══════════════════════════════════════════╝
+const firebaseConfig = {
+  apiKey:            "TU_API_KEY",
+  authDomain:        "TU-PROYECTO.firebaseapp.com",
+  databaseURL:       "https://TU-PROYECTO-default-rtdb.firebaseio.com",
+  projectId:         "TU-PROYECTO",
+  storageBucket:     "TU-PROYECTO.appspot.com",
+  messagingSenderId: "TU_SENDER_ID",
+  appId:             "TU_APP_ID"
+};
+// ════════════════════════════════════════════
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let hist    = [];
+let midiendo = false;
+
+// ── Última medición en tiempo real ──
+db.ref("/ultimaMedicion").on("value", snap => {
+  const d = snap.val(); if (!d) return;
+  set("vTint", d.tInt, 1);
+  set("vHint", d.hInt, 0);
+  set("vTamb", d.tAmb, 1);
+  set("vHamb", d.hAmb, 0);
+  set("vTent", d.tEnt, 2);
+  if (!hist.find(r => r.seg === d.seg)) {
+    hist.unshift(d);
+    if (hist.length > 300) hist.pop();
+    renderTabla(); renderChart();
+  }
+});
+
+function set(id, val, dec) {
+  const el = document.getElementById(id);
+  const unit = el.querySelector(".unit").outerHTML;
+  el.innerHTML = (val === -1 ? "ERR" : Number(val).toFixed(dec)) + unit;
+}
+
+// ── Control midiendo ──
+db.ref("/control/midiendo").on("value", snap => {
+  midiendo = snap.val() === true;
+  syncUI();
+});
+
+// ── Segundos desde Firebase ──
+db.ref("/estado/segundos").on("value", snap => {
+  const s = snap.val() || 0;
+  const h = String(Math.floor(s/3600)).padStart(2,"0");
+  const m = String(Math.floor((s%3600)/60)).padStart(2,"0");
+  const sc= String(s%60).padStart(2,"0");
+  document.getElementById("timerDisp").textContent = `${h}:${m}:${sc}`;
+});
+
+// ── Carga historial inicial ──
+db.ref("/mediciones").orderByKey().limitToLast(300).once("value", snap => {
+  const data = snap.val(); if (!data) return;
+  hist = Object.values(data).reverse();
+  renderTabla(); renderChart();
+});
+
+// ── Conexión ──
+db.ref(".info/connected").on("value", snap => {
+  const on = snap.val() === true;
+  document.getElementById("wDot").className   = "dot " + (on ? "on" : "off");
+  document.getElementById("wLabel").textContent = on ? "Firebase online" : "Sin conexión";
+});
+
+// ── Control ──
+function setMid(v) { db.ref("/control/midiendo").set(v); }
+
+function syncUI() {
+  const b = document.getElementById("badge");
+  document.getElementById("badgeTxt").textContent = midiendo ? "Midiendo…" : "Detenido";
+  b.className = "badge" + (midiendo ? " run" : "");
+  document.getElementById("bStart").disabled = midiendo;
+  document.getElementById("bStop").disabled  = !midiendo;
+}
+
+// ── Tabla ──
+function renderTabla() {
+  document.getElementById("cntReg").textContent = `${hist.length} registros`;
+  const tbody = document.getElementById("tbody");
+  if (!hist.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">Sin registros.</td></tr>`; return;
+  }
+  tbody.innerHTML = hist.slice(0,150).map((r,i) => `
+    <tr>
+      <td style="color:var(--muted)">${i+1}</td>
+      <td style="color:var(--muted)">${r.seg}</td>
+      <td style="color:#38bdf8">${fmt(r.tInt,1)}</td>
+      <td style="color:#06b6d4">${fmt(r.hInt,0)}</td>
+      <td style="color:#f97316">${fmt(r.tAmb,1)}</td>
+      <td style="color:#a78bfa">${fmt(r.hAmb,0)}</td>
+      <td style="color:#22c55e">${fmt(r.tEnt,2)}</td>
+    </tr>`).join("");
+}
+
+function fmt(v,d){ return v===-1?"ERR":Number(v).toFixed(d); }
+
+// ── Gráfica ──
+function renderChart() {
+  const datos = hist.slice(0,40).reverse();
+  if (datos.length < 2) return;
+  const svg = document.getElementById("chartSvg");
+  const W=1000, H=160, P=14;
+
+  const allV = datos.flatMap(d=>[d.tInt,d.tAmb,d.tEnt]);
+  const minV = Math.min(...allV)-1, maxV = Math.max(...allV)+1;
+  const xOf = i => P + (i/(datos.length-1))*(W-2*P);
+  const yOf = v => P + (1-(v-minV)/(maxV-minV))*(H-2*P);
+  const pts  = (f) => datos.map((d,i)=>`${xOf(i)},${yOf(d[f])}`).join(" ");
+  const area = (f,y0) => {
+    const p = datos.map((d,i)=>`${xOf(i)},${yOf(d[f])}`).join(" ");
+    return `M ${xOf(0)},${H} L ${p} L ${xOf(datos.length-1)},${H} Z`;
+  };
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="gTi" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#38bdf8" stop-opacity=".4"/><stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/></linearGradient>
+      <linearGradient id="gTa" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f97316" stop-opacity=".4"/><stop offset="100%" stop-color="#f97316" stop-opacity="0"/></linearGradient>
+      <linearGradient id="gTe" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#22c55e" stop-opacity=".4"/><stop offset="100%" stop-color="#22c55e" stop-opacity="0"/></linearGradient>
+    </defs>
+    <path d="${area('tInt')}" fill="url(#gTi)"/>
+    <path d="${area('tAmb')}" fill="url(#gTa)"/>
+    <path d="${area('tEnt')}" fill="url(#gTe)"/>
+    <polyline points="${pts('tInt')}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline points="${pts('tAmb')}" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline points="${pts('tEnt')}" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${xOf(datos.length-1)}" cy="${yOf(datos[datos.length-1].tInt)}" r="4" fill="#38bdf8"/>
+    <circle cx="${xOf(datos.length-1)}" cy="${yOf(datos[datos.length-1].tAmb)}" r="4" fill="#f97316"/>
+    <circle cx="${xOf(datos.length-1)}" cy="${yOf(datos[datos.length-1].tEnt)}" r="4" fill="#22c55e"/>
+  `;
+}
+
+// ── Exportar Excel ──
+function expExcel() {
+  if (!hist.length) { alert("No hay datos."); return; }
+  const rows = hist.map((r,i)=>({
+    "N°":i+1,"Tiempo(s)":r.seg,
+    "T.Interior(°C)":r.tInt,"H.Interior(%)":r.hInt,
+    "T.Ambiente(°C)":r.tAmb,"H.Ambiente(%)":r.hAmb,
+    "T.Entrada(°C)":r.tEnt
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws["!cols"]=[{wch:5},{wch:11},{wch:15},{wch:14},{wch:15},{wch:14},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Mediciones");
+  XLSX.writeFile(wb, `ambiental_${Date.now()}.xlsx`);
+}
+
+// ── Exportar TXT ──
+function expTxt() {
+  if (!hist.length) { alert("No hay datos."); return; }
+  const cab = "N°\tTiempo(s)\tT.Int(°C)\tH.Int(%)\tT.Amb(°C)\tH.Amb(%)\tT.Ent(°C)";
+  const fil = hist.map((r,i)=>
+    `${i+1}\t${r.seg}\t${fmt(r.tInt,1)}\t${fmt(r.hInt,0)}\t${fmt(r.tAmb,1)}\t${fmt(r.hAmb,0)}\t${fmt(r.tEnt,2)}`
+  );
+  const blob = new Blob([[cab,...fil].join("\n")],{type:"text/plain;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `ambiental_${Date.now()}.txt`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ── Limpiar ──
+function limpiar() {
+  if (!confirm("¿Limpiar tabla y gráfica local? (No borra Firebase)")) return;
+  hist = [];
+  renderTabla();
+  document.getElementById("chartSvg").innerHTML =
+    `<text x="500" y="85" text-anchor="middle" fill="#7d8590" font-size="13">Sin datos</text>`;
+}
+</script>
+</body>
+</html>
